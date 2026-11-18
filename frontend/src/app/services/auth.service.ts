@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap } from 'rxjs';
+import { Observable, tap, throwError } from 'rxjs';
 import { LoginRequest, LoginResponse, RegisterRequest } from '../models/user';
 
 @Injectable({
@@ -71,6 +71,32 @@ export class AuthService {
 
   getToken(): string | null {
     return localStorage.getItem(this.tokenKey);
+  }
+
+  getRefreshToken(): string | null {
+    return localStorage.getItem(this.refreshTokenKey);
+  }
+
+  saveTokens(accessToken: string, refreshToken?: string): void {
+    localStorage.setItem(this.accessTokenKey, accessToken);
+    localStorage.setItem(this.tokenKey, accessToken);
+    if (refreshToken) {
+      localStorage.setItem(this.refreshTokenKey, refreshToken);
+    }
+  }
+
+  refreshToken(): Observable<any> {
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) {
+      return throwError(() => new Error('No refresh token available'));
+    }
+    return this.http.post<any>(`${this.apiUrl}/refresh`, { refreshToken }).pipe(
+      tap(response => {
+        if (response && response.accessToken) {
+          this.saveTokens(response.accessToken, response.refreshToken);
+        }
+      })
+    );
   }
 
   getUsername(): string | null {

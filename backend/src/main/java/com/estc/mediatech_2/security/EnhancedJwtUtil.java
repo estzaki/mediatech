@@ -2,7 +2,6 @@ package com.estc.mediatech_2.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +10,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
-import java.security.Key;
+import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -20,15 +19,15 @@ import java.util.stream.Collectors;
 
 /**
  * Enhanced JWT Utility Service with Enterprise Security Features
- * 
+ *
  * Security Enhancements:
  * - Separate access and refresh token generation
  * - Role-based claims
  * - Token type identification
  * - Stronger key management
- * 
- * OWASP Reference: A02:2021 – Cryptographic Failures
- * OWASP Reference: A07:2021 – Identification and Authentication Failures
+ *
+ * Migrated to the jjwt 0.12.x API (OWASP A03:2025 - Software Supply Chain Failures)
+ * OWASP Reference: A04:2025 - Cryptographic Failures
  */
 @Service
 @Slf4j
@@ -67,7 +66,7 @@ public class EnhancedJwtUtil {
 
     /**
      * Generate Access Token with role-based claims
-     * 
+     *
      * Security: Short-lived tokens (15 minutes) reduce exposure window
      */
     public String generateAccessToken(UserDetails userDetails) {
@@ -97,22 +96,22 @@ public class EnhancedJwtUtil {
 
     /**
      * Build JWT token with specified claims and expiration
-     * 
+     *
      * Security: Uses HS256 algorithm with proper key derivation
      */
     private String buildToken(Map<String, Object> claims, String subject, long expiration) {
         return Jwts.builder()
-                .setClaims(claims)
-                .setSubject(subject)
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + expiration))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .claims(claims)
+                .subject(subject)
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
     }
 
     /**
      * Validate JWT token against user details and blacklist
-     * 
+     *
      * Security: Multi-layer validation
      */
     public boolean isTokenValid(String token, UserDetails userDetails) {
@@ -139,23 +138,23 @@ public class EnhancedJwtUtil {
 
     /**
      * Extract all claims from JWT token
-     * 
+     *
      * Security: Validates signature during parsing
      */
     private Claims extractAllClaims(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     /**
      * Get signing key from secret
-     * 
+     *
      * Security: Uses HMAC-SHA with proper key derivation
      */
-    private Key getSigningKey() {
+    private SecretKey getSigningKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }

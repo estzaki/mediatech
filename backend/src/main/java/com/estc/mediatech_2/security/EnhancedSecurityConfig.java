@@ -20,8 +20,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
 import java.util.List;
+/////////////////////////////ADDED IMPORTS//////////////////////////////////////////////////////////////////
+import org.springframework.security.config.Customizer;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter;
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
  * Enterprise-Grade Spring Security Configuration
@@ -83,8 +87,11 @@ public class EnhancedSecurityConfig {
                         // X-Frame-Options: Prevent clickjacking
                         .frameOptions(frame -> frame.deny())
 
-                        // X-Content-Type-Options: Prevent MIME sniffing
-                        .contentTypeOptions(contentType -> contentType.disable())
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+          /*modified */ .contentTypeOptions(Customizer.withDefaults())
+               /*added */  .referrerPolicy(ref -> ref.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+               /*added */ .crossOriginOpenerPolicy(coop -> coop.policy(CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy.SAME_ORIGIN))
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
                         // Content Security Policy: Restrict resource loading
                         .contentSecurityPolicy(csp -> csp
@@ -93,13 +100,20 @@ public class EnhancedSecurityConfig {
                                         "style-src 'self' 'unsafe-inline'; " +
                                         "img-src 'self' data:; " +
                                         "font-src 'self'; " +
-                                        "frame-ancestors 'none'")))
+                                        "frame-ancestors 'none'"))
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+               /*added*/.permissionsPolicy(pp -> pp.policy("geolocation=(), microphone=(), camera=()"))
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////             
+                    )
 
                 // Authorization Rules
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////                        
+               /*added*/.requestMatchers("/actuator/health").permitAll()
+           /*modified */.requestMatchers("/actuator/**").hasAuthority("ADMIN")
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////                        
                         .requestMatchers("/error").permitAll()
 
                         // Role-based authorization (additional to @PreAuthorize)

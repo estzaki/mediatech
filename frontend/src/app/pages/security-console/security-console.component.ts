@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { SecurityService, UserRiskProfile, InvoiceStats, VulnerabilityReport } from '../../services/security.service';
+import { SecurityService, UserRiskProfile, InvoiceStats, VulnerabilityReport, SecurityAlert } from '../../services/security.service';
 
 @Component({
     selector: 'app-security-console',
@@ -10,10 +10,12 @@ import { SecurityService, UserRiskProfile, InvoiceStats, VulnerabilityReport } f
     styleUrls: ['./security-console.component.css']
 })
 export class SecurityConsoleComponent implements OnInit {
+    alerts: SecurityAlert[] = [];
     riskyUsers: UserRiskProfile[] = [];
     invoiceStats: InvoiceStats | null = null;
     vulnerabilities: VulnerabilityReport[] = [];
     loading = true;
+    acknowledgingId: string | null = null;
 
     constructor(private securityService: SecurityService) { }
 
@@ -24,7 +26,12 @@ export class SecurityConsoleComponent implements OnInit {
     loadData() {
         this.loading = true;
 
-        // ForkJoin could be used here, but simple sequential/parallel calls are fine for now
+        // Phase 9: Real-Time Active SOC Alerts
+        this.securityService.getActiveAlerts().subscribe({
+            next: (data) => this.alerts = data,
+            error: (e) => console.error('Error fetching alerts:', e)
+        });
+
         this.securityService.getRiskyUsers().subscribe({
             next: (data) => this.riskyUsers = data,
             error: (e) => console.error(e)
@@ -39,6 +46,29 @@ export class SecurityConsoleComponent implements OnInit {
             next: (data) => this.vulnerabilities = data,
             error: (e) => console.error(e),
             complete: () => this.loading = false
+        });
+    }
+
+    refreshAlerts() {
+        this.securityService.getActiveAlerts().subscribe({
+            next: (data) => this.alerts = data,
+            error: (e) => console.error('Failed to refresh alerts:', e)
+        });
+    }
+
+    acknowledgeAlert(alert: SecurityAlert) {
+        this.acknowledgingId = alert.id;
+        this.securityService.acknowledgeAlert(alert.id).subscribe({
+            next: () => {
+                alert.acknowledged = true;
+                alert.acknowledgedBy = 'ADMIN';
+                alert.acknowledgedAt = new Date().toISOString();
+                this.acknowledgingId = null;
+            },
+            error: (err) => {
+                console.error('Error acknowledging alert:', err);
+                this.acknowledgingId = null;
+            }
         });
     }
 

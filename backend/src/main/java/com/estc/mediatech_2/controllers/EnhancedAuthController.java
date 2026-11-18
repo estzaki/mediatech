@@ -22,6 +22,7 @@ import org.springframework.security.authentication.LockedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -236,12 +237,14 @@ public class EnhancedAuthController {
     }
 
     @PostMapping("/register/vendeur")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<UserResponseDto> registerVendeur(@RequestBody UserRequestDto request) {
         request.setRole(UserEntity.ROLE_VENDEUR);
         return ResponseEntity.ok(userService.createUser(request));
     }
 
     @PostMapping("/register/admin")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<UserResponseDto> registerAdmin(@RequestBody UserRequestDto request) {
         request.setRole(UserEntity.ROLE_ADMIN);
         return ResponseEntity.ok(userService.createUser(request));

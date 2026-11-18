@@ -4,18 +4,23 @@ import com.estc.mediatech_2.service.SecurityAuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.LockedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
-
 /**
  * Centralized Security Exception Handler
  * 
@@ -31,6 +36,7 @@ import java.util.Map;
  * - A09:2021 – Security Logging and Monitoring Failures
  */
 @RestControllerAdvice
+@Order(Ordered.HIGHEST_PRECEDENCE + 1) // Runs right after SQLInjectionValidator and before GlobalExceptionHandler
 @RequiredArgsConstructor
 @Slf4j
 public class SecurityExceptionHandler {
@@ -266,6 +272,35 @@ public class SecurityExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+public ResponseEntity<Map<String, Object>> handleValidation(
+        MethodArgumentNotValidException ex, HttpServletRequest request) {
+    log.warn("Validation failed on {} ({} field errors)",
+            request.getRequestURI(), ex.getBindingResult().getFieldErrorCount());
+    return error(HttpStatus.BAD_REQUEST, "Bad Request", "Invalid request data");
+}
+
+@ExceptionHandler(HttpMessageNotReadableException.class)
+public ResponseEntity<Map<String, Object>> handleUnreadable(
+        HttpMessageNotReadableException ex, HttpServletRequest request) {
+    log.warn("Unreadable request body on {}", request.getRequestURI());
+    return error(HttpStatus.BAD_REQUEST, "Bad Request", "Malformed request body");
+}
+
+@ExceptionHandler(DataIntegrityViolationException.class)
+public ResponseEntity<Map<String, Object>> handleIntegrity(
+        DataIntegrityViolationException ex, HttpServletRequest request) {
+    log.error("Data integrity violation on {}", request.getRequestURI(), ex);
+    return error(HttpStatus.CONFLICT, "Conflict", "The request conflicts with existing data");
+}
+@ExceptionHandler(BusinessRuleException.class)
+public ResponseEntity<Map<String, Object>> handleBusinessRule(
+        BusinessRuleException ex, HttpServletRequest request) {
+    log.warn("Business rule violation on {}: {}", request.getRequestURI(), ex.getMessage());
+    return error(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage());
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // Helper methods
 
@@ -290,4 +325,14 @@ public class SecurityExceptionHandler {
     private String getUserAgent(HttpServletRequest request) {
         return request.getHeader("User-Agent");
     }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    private ResponseEntity<Map<String, Object>> error(HttpStatus status, String error, String message) {
+    Map<String, Object> body = new HashMap<>();
+    body.put("timestamp", Instant.now());
+    body.put("status", status.value());
+    body.put("error", error);
+    body.put("message", message);
+    return ResponseEntity.status(status).body(body);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 }

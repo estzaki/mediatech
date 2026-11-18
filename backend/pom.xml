@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>3.2.2</version>
+		<version>3.5.7</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.estc</groupId>
@@ -27,8 +27,8 @@
 		<url/>
 	</scm>
 	<properties>
-		<java.version>21</java.version>
-		<lombok.version>1.18.38</lombok.version>
+		<java.version>25</java.version>
+		<lombok.version>1.18.42</lombok.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -51,25 +51,25 @@
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
-            <version>0.11.5</version>
+            <version>0.12.6</version>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-impl</artifactId>
-            <version>0.11.5</version>
+            <version>0.12.6</version>
             <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-jackson</artifactId>
-            <version>0.11.5</version>
+            <version>0.12.6</version>
             <scope>runtime</scope>
         </dependency>
         <!-- PDF Generation -->
         <dependency>
             <groupId>com.itextpdf</groupId>
             <artifactId>itextpdf</artifactId>
-            <version>5.5.13.3</version>
+            <version>5.5.13.4</version>
         </dependency>
 
 		<dependency>
@@ -138,7 +138,29 @@
 					</excludes>
 				</configuration>
 			</plugin>
-			
+
+			<!-- SBOM generation (CycloneDX) - OWASP A03:2025 Software Supply Chain Failures -->
+			<plugin>
+				<groupId>org.cyclonedx</groupId>
+				<artifactId>cyclonedx-maven-plugin</artifactId>
+				<version>2.9.1</version>
+				<configuration>
+					<projectType>application</projectType>
+					<schemaVersion>1.5</schemaVersion>
+					<outputFormat>json</outputFormat>
+					<outputName>application.cdx</outputName>
+					<outputDirectory>${project.build.outputDirectory}/META-INF/sbom</outputDirectory>
+				</configuration>
+				<executions>
+					<execution>
+						<phase>generate-resources</phase>
+						<goals>
+							<goal>makeBom</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
 			<!-- OWASP Dependency-Check Plugin for CVE Scanning -->
 			<plugin>
 				<groupId>org.owasp</groupId>

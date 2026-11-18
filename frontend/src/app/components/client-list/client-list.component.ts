@@ -40,13 +40,18 @@ export class ClientListComponent implements OnInit {
   }
 
   saveClient() {
+    const payload: Client = {
+      nom_client: this.newClient.nom_client,
+      prenom_client: this.newClient.prenom_client,
+      telephone: this.newClient.telephone
+    };
     if (this.isEditing && this.editingId) {
-      this.clientService.updateClient(this.editingId, this.newClient).subscribe(() => {
+      this.clientService.updateClient(this.editingId, payload).subscribe(() => {
         this.loadClients();
         this.resetForm();
       });
     } else {
-      this.clientService.createClient(this.newClient).subscribe(() => {
+      this.clientService.createClient(payload).subscribe(() => {
         this.loadClients();
         this.resetForm();
       });

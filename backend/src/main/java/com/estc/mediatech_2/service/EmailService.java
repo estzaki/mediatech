@@ -35,4 +35,31 @@ public class EmailService {
             System.err.println("Erreur lors de l'envoi de l'email : " + e.getMessage());
         }
     }
+
+    /**
+     * Send real-time security alert email to SOC team (Phase 9 - A09:2025)
+     */
+    public void sendSecurityAlertEmail(String toEmail, String eventType, String severity, String user, String ipAddress, String details) {
+        String subject = "🚨 [SOC ALERTE " + severity + "] Incident: " + eventType;
+        String message = "ALERTE DE SECURITE EN TEMPS REEL (OWASP A09)\n\n" +
+                "Niveau de sévérité : " + severity + "\n" +
+                "Type d'événement   : " + eventType + "\n" +
+                "Utilisateur        : " + (user != null ? user : "anonymous") + "\n" +
+                "Adresse IP         : " + (ipAddress != null ? ipAddress : "N/A") + "\n" +
+                "Détails            : " + details + "\n\n" +
+                "Action requise : Rendez-vous sur la console SOC pour investiguer et acquitter cette alerte.\n" +
+                "MediaTech SOC Security Center";
+
+        SimpleMailMessage email = new SimpleMailMessage();
+        email.setTo(toEmail);
+        email.setSubject(subject);
+        email.setText(message);
+
+        try {
+            mailSender.send(email);
+            System.out.println("Email d'alerte sécurité envoyé à " + toEmail);
+        } catch (Exception e) {
+            System.err.println("Notice: Envoi email d'alerte simulé / non délivré (mailSender non configuré) : " + e.getMessage());
+        }
+    }
 }

@@ -42,8 +42,16 @@ export class ProduitListComponent implements OnInit {
       return;
     }
 
+    const payload: Produit = {
+      ref_produit: this.newProduit.ref_produit,
+      libelle_produit: this.newProduit.libelle_produit,
+      prix_unitaire: this.newProduit.prix_unitaire,
+      qte_stock: this.newProduit.qte_stock,
+      imageUrl: this.newProduit.imageUrl
+    };
+
     if (this.isEditing && this.editingId) {
-      this.produitService.updateProduit(this.editingId, this.newProduit).subscribe({
+      this.produitService.updateProduit(this.editingId, payload).subscribe({
         next: () => {
           this.loadProduits();
           this.resetForm();
@@ -51,7 +59,7 @@ export class ProduitListComponent implements OnInit {
         error: (err) => alert("Erreur lors de la modification.")
       });
     } else {
-      this.produitService.createProduit(this.newProduit).subscribe({
+      this.produitService.createProduit(payload).subscribe({
         next: () => {
           this.loadProduits();
           this.resetForm();

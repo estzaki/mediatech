@@ -206,3 +206,69 @@ td {
     font-weight: 700;
     color: #f8fafc;
 }
+
+/* Real-Time Alerts Section (Phase 9 - A09:2025) */
+.alerts-section {
+    grid-column: 1 / -1;
+    border-left: 4px solid #ef4444;
+}
+
+.alerts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.btn-refresh {
+    background: #334155;
+    color: #f8fafc;
+    border: 1px solid #475569;
+    padding: 0.35rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-refresh:hover {
+    background: #475569;
+}
+
+.btn-ack {
+    background: #0284c7;
+    color: white;
+    border: none;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-ack:hover:not(:disabled) {
+    background: #0369a1;
+}
+
+.btn-ack:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.badge-ack {
+    background-color: #166534;
+    color: #bbf7d0;
+    padding: 0.25rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-alert-count {
+    background-color: #dc2626;
+    color: white;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+}

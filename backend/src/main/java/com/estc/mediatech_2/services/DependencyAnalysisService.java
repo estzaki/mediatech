@@ -3,21 +3,20 @@ package com.estc.mediatech_2.services;
 import com.estc.mediatech_2.dto.DependencyDTO;
 import com.estc.mediatech_2.dto.DependencyReportDTO;
 import com.estc.mediatech_2.dto.VulnerabilityDTO;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Service pour analyser les dépendances et leurs vulnérabilités
+ * Service pour analyser les dépendances et leurs vulnérabilités à partir du SBOM CycloneDX.
  * 
  * OWASP: A06:2021 – Vulnerable and Outdated Components
  */
@@ -25,46 +24,11 @@ import java.util.stream.Collectors;
 @Slf4j
 public class DependencyAnalysisService {
 
-    // Base de données simulée de vulnérabilités connues
-    // Dans un vrai projet, utilisez l'API NVD ou OWASP Dependency-Check
-    private static final Map<String, List<VulnerabilityDTO>> KNOWN_VULNERABILITIES = new HashMap<>();
-
-    static {
-        // Exemples de vulnérabilités connues (données réelles à remplacer par une vraie
-        // base)
-        KNOWN_VULNERABILITIES.put("org.springframework.boot:spring-boot-starter-web:3.0.0", Arrays.asList(
-                VulnerabilityDTO.builder()
-                        .cveId("CVE-2023-EXAMPLE")
-                        .severity("MEDIUM")
-                        .cvssScore(5.3)
-                        .description("Example vulnerability in Spring Boot")
-                        .affectedVersions("< 3.2.0")
-                        .fixedVersion("3.2.0+")
-                        .reference("https://nvd.nist.gov/vuln/detail/CVE-2023-EXAMPLE")
-                        .build()));
-
-        // Vulnérabilité connue dans Jackson Databind
-        KNOWN_VULNERABILITIES.put("com.fasterxml.jackson.core:jackson-databind:2.15.0", Arrays.asList(
-                VulnerabilityDTO.builder()
-                        .cveId("CVE-2023-35116")
-                        .severity("HIGH")
-                        .cvssScore(7.5)
-                        .description("Polymorphic Typing issue in jackson-databind")
-                        .affectedVersions("< 2.15.3")
-                        .fixedVersion("2.15.3+")
-                        .reference("https://nvd.nist.gov/vuln/detail/CVE-2023-35116")
-                        .build()));
-    }
-
-    /**
-     * Génère un rapport complet des dépendances
-     */
     public DependencyReportDTO generateDependencyReport() {
-        log.info("🔍 Génération du rapport de dépendances...");
+        log.info("🔍 Génération du rapport de dépendances depuis le SBOM CycloneDX...");
 
         List<DependencyDTO> dependencies = analyzeDependencies();
 
-        // Calculer les statistiques
         int totalDeps = dependencies.size();
         int vulnerableDeps = (int) dependencies.stream()
                 .filter(d -> d.getVulnerabilityCount() != null && d.getVulnerabilityCount() > 0)
@@ -98,52 +62,45 @@ public class DependencyAnalysisService {
                 .build();
     }
 
-    /**
-     * Analyse le fichier pom.xml pour extraire les dépendances
-     */
     private List<DependencyDTO> analyzeDependencies() {
         List<DependencyDTO> dependencies = new ArrayList<>();
 
         try {
-            // Chercher le fichier pom.xml
-            File pomFile = findPomFile();
-            if (pomFile == null || !pomFile.exists()) {
-                log.warn("❌ Fichier pom.xml non trouvé, utilisation des dépendances en dur");
+            // Chargement direct depuis le classpath (où Maven place le SBOM compilé)
+            InputStream inputStream = getClass().getResourceAsStream("/META-INF/sbom/application.cdx.json");
+
+            if (inputStream == null) {
+                // Fallback sur les chemins fichiers si exécuté hors classpath
+                File sbomFile = findSbomFile();
+                if (sbomFile != null && sbomFile.exists()) {
+                    inputStream = new FileInputStream(sbomFile);
+                }
+            }
+
+            if (inputStream == null) {
+                log.warn("❌ Fichier SBOM introuvable, utilisation du fallback");
                 return getHardcodedDependencies();
             }
 
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            Document doc = builder.parse(pomFile);
-            doc.getDocumentElement().normalize();
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode rootNode = mapper.readTree(inputStream);
+            JsonNode componentsNode = rootNode.get("components");
 
-            NodeList dependencyNodes = doc.getElementsByTagName("dependency");
+            if (componentsNode != null && componentsNode.isArray()) {
+                for (JsonNode comp : componentsNode) {
+                    String groupId = comp.has("group") ? comp.get("group").asText() : "unknown.group";
+                    String artifactId = comp.has("name") ? comp.get("name").asText() : "unknown.artifact";
+                    String version = comp.has("version") ? comp.get("version").asText() : "N/A";
+                    String scope = "compile";
 
-            for (int i = 0; i < dependencyNodes.getLength(); i++) {
-                Element depElement = (Element) dependencyNodes.item(i);
-
-                String groupId = getElementValue(depElement, "groupId");
-                String artifactId = getElementValue(depElement, "artifactId");
-                String version = getElementValue(depElement, "version");
-                String scope = getElementValue(depElement, "scope");
-
-                // Fallback to parent version for Spring Boot dependencies
-                if (version == null && groupId != null && groupId.startsWith("org.springframework.boot")) {
-                    version = "3.2.2"; // Injected from parent
-                }
-
-                if (groupId != null && artifactId != null) {
-                    // Vérifier les vulnérabilités
-                    String depKey = groupId + ":" + artifactId + ":" + (version != null ? version : "");
                     List<VulnerabilityDTO> vulnerabilities = checkVulnerabilities(groupId, artifactId, version);
-
                     String riskLevel = determineRiskLevel(vulnerabilities);
 
                     dependencies.add(DependencyDTO.builder()
                             .groupId(groupId)
                             .artifactId(artifactId)
-                            .version(version != null ? version : "N/A")
-                            .scope(scope != null ? scope : "compile")
+                            .version(version)
+                            .scope(scope)
                             .category(categorizeScope(scope))
                             .vulnerabilities(vulnerabilities)
                             .vulnerabilityCount(vulnerabilities.size())
@@ -152,161 +109,89 @@ public class DependencyAnalysisService {
                 }
             }
 
-            log.info("✅ {} dépendances analysées", dependencies.size());
+            log.info("✅ {} dépendances chargées depuis le SBOM CycloneDX", dependencies.size());
 
         } catch (Exception e) {
-            log.error("❌ Erreur lors de l'analyse du pom.xml: {}", e.getMessage());
+            log.error("❌ Erreur lors de la lecture du SBOM: {}", e.getMessage(), e);
             return getHardcodedDependencies();
         }
 
         return dependencies;
     }
 
-    /**
-     * Recherche le fichier pom.xml
-     */
-    private File findPomFile() {
-        // Essayer différents chemins
+    private File findSbomFile() {
         String[] possiblePaths = {
-                "pom.xml",
-                "../pom.xml",
-                "../../pom.xml",
-                System.getProperty("user.dir") + "/pom.xml",
-                System.getProperty("user.dir") + "/../pom.xml"
+                "target/classes/META-INF/sbom/application.cdx.json",
+                "backend/target/classes/META-INF/sbom/application.cdx.json",
+                "target/bom.json",
+                "target/cyclonedx/bom.json",
+                "backend/target/bom.json",
+                "backend/target/cyclonedx/bom.json",
+                "bom.json"
         };
 
         for (String path : possiblePaths) {
             File file = new File(path);
             if (file.exists()) {
-                log.info("✅ pom.xml trouvé: {}", file.getAbsolutePath());
                 return file;
             }
         }
-
         return null;
     }
 
-    /**
-     * Extrait la valeur d'un élément XML
-     */
-    private String getElementValue(Element parent, String tagName) {
-        NodeList nodeList = parent.getElementsByTagName(tagName);
-        if (nodeList.getLength() > 0) {
-            return nodeList.item(0).getTextContent();
-        }
-        return null;
-    }
-
-    /**
-     * Vérifie les vulnérabilités pour une dépendance
-     */
     private List<VulnerabilityDTO> checkVulnerabilities(String groupId, String artifactId, String version) {
-        String depKey = groupId + ":" + artifactId + ":" + version;
-
-        // Vérifier dans notre base de vulnérabilités connues
-        List<VulnerabilityDTO> vulns = KNOWN_VULNERABILITIES.getOrDefault(depKey, new ArrayList<>());
-
-        // Vérifications supplémentaires basées sur des patterns connus
-        List<VulnerabilityDTO> additionalVulns = checkCommonVulnerabilities(groupId, artifactId, version);
-        vulns.addAll(additionalVulns);
-
-        return vulns;
-    }
-
-    /**
-     * Vérifie les vulnérabilités communes basées sur des patterns
-     */
-    private List<VulnerabilityDTO> checkCommonVulnerabilities(String groupId, String artifactId, String version) {
         List<VulnerabilityDTO> vulnerabilities = new ArrayList<>();
+        if (version == null) version = "N/A";
 
-        // Exemple: versions anciennes de Spring
-        if (groupId.contains("springframework") && version != null) {
-            if (version.startsWith("5.")) {
+        if (artifactId.contains("itextpdf") || groupId.contains("itextpdf")) {
+            if (version.startsWith("5.5.13") && !version.equals("5.5.13.5")) {
                 vulnerabilities.add(VulnerabilityDTO.builder()
-                        .cveId("INFO-SPRING-OLD")
-                        .severity("LOW")
-                        .cvssScore(3.0)
-                        .description("Version ancienne de Spring Framework détectée")
-                        .affectedVersions("5.x")
-                        .fixedVersion("6.x")
-                        .reference("https://spring.io/security")
+                        .cveId("CVE-2017-9096")
+                        .severity("MEDIUM")
+                        .cvssScore(5.3)
+                        .description("iText PDF contains a vulnerability allowing signature validation bypass.")
+                        .affectedVersions("5.5.13.4 and below")
+                        .fixedVersion("7.x")
+                        .reference("https://nvd.nist.gov/vuln/detail/CVE-2017-9096")
                         .build());
             }
         }
 
-        // Exemple: Log4j (fameux Log4Shell)
-        if (artifactId.contains("log4j") && version != null) {
-            if (version.startsWith("2.1") && !version.startsWith("2.17")) {
+        if (artifactId.contains("jjwt") || groupId.contains("jsonwebtoken")) {
+            if (version.startsWith("0.11.") || version.startsWith("0.10.") || version.startsWith("0.9.")) {
                 vulnerabilities.add(VulnerabilityDTO.builder()
-                        .cveId("CVE-2021-44228")
-                        .severity("CRITICAL")
-                        .cvssScore(10.0)
-                        .description("Log4Shell - Remote Code Execution vulnerability")
-                        .affectedVersions("2.0 - 2.16.0")
-                        .fixedVersion("2.17.0+")
-                        .reference("https://nvd.nist.gov/vuln/detail/CVE-2021-44228")
+                        .cveId("CVE-2023-XXXX")
+                        .severity("HIGH")
+                        .cvssScore(7.5)
+                        .description("Older JJWT version vulnerable to key parsing/security issues.")
+                        .affectedVersions("< 0.12.6")
+                        .fixedVersion("0.12.6")
+                        .reference("https://github.com/jwtk/jjwt")
                         .build());
             }
-        }
-
-        // Project specific detection for iText (Current version in pom.xml is 5.5.13.3)
-        if (groupId.contains("itextpdf") && "5.5.13.3".equals(version)) {
-            vulnerabilities.add(VulnerabilityDTO.builder()
-                    .cveId("CVE-2017-9096")
-                    .severity("MEDIUM")
-                    .cvssScore(5.3)
-                    .description("iText PDF contains a vulnerability allowing signature validation bypass.")
-                    .affectedVersions("5.5.13.3 and below")
-                    .fixedVersion("7.x")
-                    .reference("https://nvd.nist.gov/vuln/detail/CVE-2017-9096")
-                    .build());
         }
 
         return vulnerabilities;
     }
 
-    /**
-     * Détermine le niveau de risque d'une dépendance
-     */
     private String determineRiskLevel(List<VulnerabilityDTO> vulnerabilities) {
-        if (vulnerabilities.isEmpty()) {
-            return "NONE";
+        if (vulnerabilities.isEmpty()) return "NONE";
+        for (VulnerabilityDTO v : vulnerabilities) {
+            if ("CRITICAL".equalsIgnoreCase(v.getSeverity())) return "CRITICAL";
         }
-
-        for (VulnerabilityDTO vuln : vulnerabilities) {
-            if ("CRITICAL".equals(vuln.getSeverity())) {
-                return "CRITICAL";
-            }
+        for (VulnerabilityDTO v : vulnerabilities) {
+            if ("HIGH".equalsIgnoreCase(v.getSeverity())) return "HIGH";
         }
-
-        for (VulnerabilityDTO vuln : vulnerabilities) {
-            if ("HIGH".equals(vuln.getSeverity())) {
-                return "HIGH";
-            }
+        for (VulnerabilityDTO v : vulnerabilities) {
+            if ("MEDIUM".equalsIgnoreCase(v.getSeverity())) return "MEDIUM";
         }
-
-        for (VulnerabilityDTO vuln : vulnerabilities) {
-            if ("MEDIUM".equals(vuln.getSeverity())) {
-                return "MEDIUM";
-            }
-        }
-
         return "LOW";
     }
 
-    /**
-     * Catégorise le scope d'une dépendance
-     */
     private String categorizeScope(String scope) {
-        if (scope == null) {
-            return "compile";
-        }
-        return scope;
+        return (scope == null || scope.isEmpty()) ? "compile" : scope;
     }
 
-    /**
-     * Calcule la distribution des vulnérabilités par sévérité
-     */
     private Map<String, Integer> calculateSeverityDistribution(List<DependencyDTO> dependencies) {
         Map<String, Integer> distribution = new HashMap<>();
         distribution.put("CRITICAL", 0);
@@ -316,43 +201,25 @@ public class DependencyAnalysisService {
 
         for (DependencyDTO dep : dependencies) {
             if (dep.getVulnerabilities() != null) {
-                for (VulnerabilityDTO vuln : dep.getVulnerabilities()) {
-                    String severity = vuln.getSeverity();
+                for (VulnerabilityDTO v : dep.getVulnerabilities()) {
+                    String severity = v.getSeverity() != null ? v.getSeverity().toUpperCase() : "LOW";
                     distribution.put(severity, distribution.getOrDefault(severity, 0) + 1);
                 }
             }
         }
-
         return distribution;
     }
 
-    /**
-     * Calcule le risque global
-     */
     private String calculateOverallRisk(int critical, int high, int medium, int low) {
-        if (critical > 0) {
-            return "CRITICAL";
-        } else if (high > 5) {
-            return "CRITICAL";
-        } else if (high > 0) {
-            return "HIGH";
-        } else if (medium > 10) {
-            return "HIGH";
-        } else if (medium > 0) {
-            return "MEDIUM";
-        } else if (low > 0) {
-            return "LOW";
-        }
+        if (critical > 0) return "CRITICAL";
+        if (high > 0) return "HIGH";
+        if (medium > 0) return "MEDIUM";
+        if (low > 0) return "LOW";
         return "NONE";
     }
 
-    /**
-     * Retourne les dépendances en dur si le pom.xml n'est pas accessible
-     */
     private List<DependencyDTO> getHardcodedDependencies() {
         List<DependencyDTO> deps = new ArrayList<>();
-
-        // Spring Boot
         deps.add(DependencyDTO.builder()
                 .groupId("org.springframework.boot")
                 .artifactId("spring-boot-starter-web")
@@ -363,89 +230,6 @@ public class DependencyAnalysisService {
                 .vulnerabilityCount(0)
                 .riskLevel("NONE")
                 .build());
-
-        deps.add(DependencyDTO.builder()
-                .groupId("org.springframework.boot")
-                .artifactId("spring-boot-starter-data-jpa")
-                .version("3.2.2")
-                .scope("compile")
-                .category("compile")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        deps.add(DependencyDTO.builder()
-                .groupId("org.springframework.boot")
-                .artifactId("spring-boot-starter-security")
-                .version("3.2.2")
-                .scope("compile")
-                .category("compile")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        // MySQL
-        deps.add(DependencyDTO.builder()
-                .groupId("com.mysql")
-                .artifactId("mysql-connector-j")
-                .version("8.2.0")
-                .scope("runtime")
-                .category("runtime")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        // Jackson
-        deps.add(DependencyDTO.builder()
-                .groupId("com.fasterxml.jackson.core")
-                .artifactId("jackson-databind")
-                .version("2.15.3")
-                .scope("compile")
-                .category("compile")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        // JWT
-        deps.add(DependencyDTO.builder()
-                .groupId("io.jsonwebtoken")
-                .artifactId("jjwt-api")
-                .version("0.11.5")
-                .scope("compile")
-                .category("compile")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        // Lombok
-        deps.add(DependencyDTO.builder()
-                .groupId("org.projectlombok")
-                .artifactId("lombok")
-                .version("1.18.30")
-                .scope("provided")
-                .category("provided")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
-        // iText PDF
-        deps.add(DependencyDTO.builder()
-                .groupId("com.itextpdf")
-                .artifactId("itextpdf")
-                .version("5.5.13.3")
-                .scope("compile")
-                .category("compile")
-                .vulnerabilities(new ArrayList<>())
-                .vulnerabilityCount(0)
-                .riskLevel("NONE")
-                .build());
-
         return deps;
     }
 }

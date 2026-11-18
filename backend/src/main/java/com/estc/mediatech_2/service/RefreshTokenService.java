@@ -10,19 +10,25 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.UUID;
 
 /**
  * Service for managing JWT Refresh Tokens
- * 
+ *
  * Security Features:
  * - Token rotation on refresh
  * - Automatic expiration
  * - Token revocation
  * - Cleanup of expired tokens
- * 
- * OWASP Reference: A07:2021 – Identification and Authentication Failures
+ * - Only the SHA-256 hash of a refresh token is stored in the database
+ *   (the raw token is only ever known by the client)
+ *
+ * OWASP Reference: A04:2025 - Cryptographic Failures
  */
 @Service
 @RequiredArgsConstructor
@@ -35,27 +41,48 @@ public class RefreshTokenService {
     private Long refreshTokenDurationMs;
 
     /**
-     * Create a new refresh token for a user
-     * 
-     * Security: Uses UUID v4 for cryptographically secure random tokens
+     * Create a new refresh token for a user.
+     *
+     * Security: the database stores ONLY the SHA-256 hash of the token.
+     * The returned entity carries the RAW token (so the controller can send it
+     * to the client), but it is a detached copy and is never persisted.
      */
     @Transactional
     public RefreshTokenEntity createRefreshToken(UserEntity user) {
+        String rawToken = UUID.randomUUID().toString();
+
         RefreshTokenEntity refreshToken = new RefreshTokenEntity();
         refreshToken.setUser(user);
-        refreshToken.setToken(UUID.randomUUID().toString());
+        refreshToken.setToken(hashToken(rawToken)); // hash stored in database
         refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
         refreshToken.setCreatedAt(Instant.now());
         refreshToken.setRevoked(false);
 
-        return refreshTokenDao.save(refreshToken);
+        RefreshTokenEntity saved = refreshTokenDao.save(refreshToken);
+
+        // Detached copy (NOT managed by JPA) that exposes the raw token to the caller.
+        // Do not modify the managed entity: JPA would write the raw token to the database.
+        RefreshTokenEntity result = new RefreshTokenEntity();
+        result.setId(saved.getId());
+        result.setUser(saved.getUser());
+        result.setToken(rawToken);
+        result.setExpiryDate(saved.getExpiryDate());
+        result.setCreatedAt(saved.getCreatedAt());
+        result.setRevoked(saved.isRevoked());
+        result.setRevokedAt(saved.getRevokedAt());
+        return result;
     }
 
     /**
-     * Find and validate a refresh token
+     * Find and validate a refresh token (the client sends the raw token,
+     * the lookup is done on its SHA-256 hash)
      */
     public RefreshTokenEntity verifyRefreshToken(String token) {
-        RefreshTokenEntity refreshToken = refreshTokenDao.findByToken(token)
+        if (token == null || token.isBlank()) {
+            throw new RuntimeException("Refresh token not found");
+        }
+
+        RefreshTokenEntity refreshToken = refreshTokenDao.findByToken(hashToken(token))
                 .orElseThrow(() -> new RuntimeException("Refresh token not found"));
 
         if (!refreshToken.isValid()) {
@@ -68,7 +95,7 @@ public class RefreshTokenService {
 
     /**
      * Rotate refresh token: revoke old, create new
-     * 
+     *
      * Security Best Practice: Token rotation prevents token reuse attacks
      */
     @Transactional
@@ -80,7 +107,7 @@ public class RefreshTokenService {
         oldRefreshToken.setRevokedAt(Instant.now());
         refreshTokenDao.save(oldRefreshToken);
 
-        // Create new token
+        // Create new token (returns the raw token for the client)
         return createRefreshToken(oldRefreshToken.getUser());
     }
 
@@ -96,7 +123,7 @@ public class RefreshTokenService {
 
     /**
      * Cleanup expired and revoked tokens - runs daily at 3 AM
-     * 
+     *
      * Performance: Prevents database bloat
      */
     @Scheduled(cron = "0 0 3 * * *")
@@ -104,5 +131,19 @@ public class RefreshTokenService {
     public void cleanupExpiredTokens() {
         refreshTokenDao.deleteExpiredOrRevokedTokens(Instant.now());
         log.info("Cleaned up expired and revoked refresh tokens");
+    }
+
+    /**
+     * SHA-256 hash of a token, as 64 hexadecimal characters.
+     * A UUID v4 has 122 bits of randomness, so an unsalted hash is sufficient here
+     * (the token cannot be guessed or brute-forced from its hash).
+     */
+    private String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(token.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
     }
 }

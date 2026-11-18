@@ -1,9 +1,12 @@
 package com.estc.mediatech_2.config;
 
+import com.estc.mediatech_2.dao.ClientDao;
 import com.estc.mediatech_2.dao.UserDao;
+import com.estc.mediatech_2.models.ClientEntity;
 import com.estc.mediatech_2.models.UserEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,37 +18,42 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 public class DataInitializer {
 
     private final UserDao userDao;
-    private final com.estc.mediatech_2.dao.ClientDao clientDao;
+    private final ClientDao clientDao;
     private final PasswordEncoder passwordEncoder;
 
-    private static final String ADMIN_USERNAME = "fatihaa";
-    private static final String ADMIN_PASSWORD = "fatiha1233";
-    private static final String VENDEUR_USERNAME = "vendeur";
-    private static final String VENDEUR_PASSWORD = "vendeur123";
-    private static final String CLIENT_USERNAME = "c1";
-    private static final String CLIENT_PASSWORD = "1234567";
+    // Identifiants de démonstration : lus depuis des variables d'environnement
+    // (valeurs par défaut conservées pour que l'application reste utilisable en local).
+    // Pour changer un mot de passe sans toucher au code :
+    //   $env:ADMIN_PASSWORD="nouveau_mot_de_passe"
+    @Value("${app.init.admin.username:fatihaa}")
+    private String adminUsername;
+
+    @Value("${app.init.admin.password:${ADMIN_PASSWORD:fatiha1233}}")
+    private String adminPassword;
+
+    @Value("${app.init.vendeur.username:vendeur}")
+    private String vendeurUsername;
+
+    @Value("${app.init.vendeur.password:${VENDEUR_PASSWORD:vendeur123}}")
+    private String vendeurPassword;
+
+    @Value("${app.init.client.username:c1}")
+    private String clientUsername;
+
+    @Value("${app.init.client.password:${CLIENT_PASSWORD:1234567}}")
+    private String clientPassword;
 
     @Bean
     CommandLineRunner initDatabase() {
         return args -> {
-            log.info("🔧 Initialisation des utilisateurs par défaut...");
-            log.info("🔑 Les mots de passe PLAINS sont :");
-            log.info("   - fatihaa : {}", ADMIN_PASSWORD);
-            log.info("   - vendeur : {}", VENDEUR_PASSWORD);
-            log.info("   - c1      : {}", CLIENT_PASSWORD);
-            log.info("==========================================");
+            log.info("Initialisation des utilisateurs par défaut...");
 
-            // Mise à jour ou Création
-            updateOrCreateUser(ADMIN_USERNAME, ADMIN_PASSWORD, UserEntity.ROLE_ADMIN);
-            updateOrCreateUser(VENDEUR_USERNAME, VENDEUR_PASSWORD, UserEntity.ROLE_VENDEUR);
-            UserEntity clientUser = updateOrCreateUser(CLIENT_USERNAME, CLIENT_PASSWORD, UserEntity.ROLE_CLIENT);
+            updateOrCreateUser(adminUsername, adminPassword, UserEntity.ROLE_ADMIN);
+            updateOrCreateUser(vendeurUsername, vendeurPassword, UserEntity.ROLE_VENDEUR);
+            UserEntity clientUser = updateOrCreateUser(clientUsername, clientPassword, UserEntity.ROLE_CLIENT);
             createClientProfileIfNotExists(clientUser);
 
-            log.info("✅ Initialisation terminée !");
-            log.info("📋 Récapitulatif :");
-            log.info("   👤 ADMIN    : {} / {}", ADMIN_USERNAME, ADMIN_PASSWORD);
-            log.info("   👤 VENDEUR  : {} / {}", VENDEUR_USERNAME, VENDEUR_PASSWORD);
-            log.info("   👤 CLIENT   : {} / {}", CLIENT_USERNAME, CLIENT_PASSWORD);
+            log.info("Initialisation terminée : comptes ADMIN, VENDEUR et CLIENT prêts");
         };
     }
 
@@ -53,38 +61,26 @@ public class DataInitializer {
         UserEntity user = userDao.findByUsername(username).orElse(new UserEntity());
         user.setUsername(username);
 
-        // ============ LOGS DES HASHs ============ EEREUR
-        log.info("   🔓 Mot de passe PLAIN pour {} : {}", username, password);
-
-        String encodedPassword = passwordEncoder.encode(password);
-        log.info("   🔐 Hash BCrypt pour {} : {}", username, encodedPassword);
-        log.info("   📏 Longueur du hash : {} caractères", encodedPassword.length());
-
-        // Vérifie le format BCrypt
-        if (!encodedPassword.startsWith("$2a$")) {
-            log.error("   ERREUR : Hash ne commence pas par $2a$ !");
-        }
-        // ============ FIN DES LOGS ============
-
-        user.setPassword(encodedPassword);
+        // Aucun log de mot de passe ni de hash (OWASP A04:2025 - Cryptographic Failures)
+        user.setPassword(passwordEncoder.encode(password));
         user.setRole(role);
         user.setEnabled(true);
 
         UserEntity saved = userDao.save(user);
-        log.info("  Utilisateur {} sauvegardé en base", username);
+        log.info("Utilisateur {} (rôle {}) sauvegardé en base", username, role);
 
         return saved;
     }
 
     private void createClientProfileIfNotExists(UserEntity user) {
         if (clientDao.findByUser_Username(user.getUsername()).isEmpty()) {
-            com.estc.mediatech_2.models.ClientEntity clientSpec = new com.estc.mediatech_2.models.ClientEntity();
+            ClientEntity clientSpec = new ClientEntity();
             clientSpec.setNom_client("Client Demo");
             clientSpec.setPrenom_client("Test");
             clientSpec.setTelephone("0600000000");
             clientSpec.setUser(user);
             clientDao.save(clientSpec);
-            log.info("   ✅ Profil Client créé pour {}", user.getUsername());
+            log.info("Profil Client créé pour {}", user.getUsername());
         }
     }
 }

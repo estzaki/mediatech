@@ -1,8 +1,11 @@
 package com.estc.mediatech_2.security.validator;
 
 import com.estc.mediatech_2.exception.InsecureDirectObjectReferenceException;
+import com.estc.mediatech_2.service.SecurityAuditService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -16,34 +19,51 @@ import org.springframework.stereotype.Component;
  * - Check authorization for each resource access
  * - Log suspicious access attempts
  * 
- * OWASP: A01:2021 – Broken Access Control
- * 
- * Academic Note:
- * IDOR vulnerabilities occur when an application provides direct access to
- * objects based on user-supplied input without proper authorization checks.
- * 
- * Example Attack:
- * GET /api/factures/123 (user owns facture 456, tries to access 123)
- * 
- * Our Defense:
- * - Verify ownership before returning data
- * - Use indirect references where possible
- * - Log all unauthorized access attempts
+ * OWASP: A01:2025 – Broken Access Control
  */
 @Component
+@RequiredArgsConstructor
 @Slf4j
 public class IDORValidator {
+
+    // Ajout du service d'audit pour enregistrer les tentatives d'accès non autorisées en base
+    private final SecurityAuditService securityAuditService;
+
+    /**
+     * Méthode utilitaire pour récupérer le rôle principal de l'utilisateur connecté.
+     * Par sécurité (fail-closed), on retourne ANONYMOUS si l'authentification est absente.
+     */
+    public String extractPrimaryRole(Authentication auth) {
+        if (auth == null || auth.getAuthorities() == null) {
+            return "ANONYMOUS";
+        }
+        return auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .findFirst()
+                .orElse("CLIENT");
+    }
 
     /**
      * Validate that the authenticated user owns the specified client
      */
     public void validateClientOwnership(Long requestedClientId, Long authenticatedClientId) {
-        if (!requestedClientId.equals(authenticatedClientId)) {
+        // Correction bug A01:2025 : on vérifie d'abord que les IDs ne sont pas null
+        // pour éviter un NullPointerException (erreur 500) et bloquer proprement l'accès (403)
+        if (requestedClientId == null || authenticatedClientId == null
+                || !requestedClientId.equals(authenticatedClientId)) {
             String username = getCurrentUsername();
             String attemptedResource = "client/" + requestedClientId;
 
             log.error("🚨 IDOR ATTEMPT DETECTED - User: {}, ClientId: {}, Attempted: {}",
                     username, authenticatedClientId, requestedClientId);
+
+            // On trace l'incident dans la table security_events
+            securityAuditService.logUnauthorizedAccess(
+                    username,
+                    attemptedResource,
+                    "IDOR_CHECK",
+                    "127.0.0.1",
+                    "Tentative d'accès horizontal au profil ou à la ressource d'un autre client");
 
             throw new InsecureDirectObjectReferenceException(username, attemptedResource);
         }
@@ -57,21 +77,28 @@ public class IDORValidator {
      * - CLIENT can only access their own factures
      */
     public void validateFactureAccess(String factureOwnerUsername, String requestedBy, String userRole) {
-        // Admin and Vendeur have access to all factures
-        if ("ADMIN".equals(userRole) || "VENDEUR".equals(userRole)) {
+        // Admin et Vendeur ont le droit de consulter toutes les factures
+        if ("ADMIN".equals(userRole) || "VENDEUR".equals(userRole)
+                || "ROLE_ADMIN".equals(userRole) || "ROLE_VENDEUR".equals(userRole)) {
             return;
         }
 
-        // For clients, verify ownership
-        if ("CLIENT".equals(userRole)) {
-            if (!requestedBy.equals(factureOwnerUsername)) {
-                log.error(
-                        "🚨 IDOR ATTEMPT - CLIENT trying to access another client's facture: {} tried to access {}'s facture",
-                        requestedBy, factureOwnerUsername);
+        // Pour un client, on vérifie strictement qu'il est bien le propriétaire de la facture
+        if (factureOwnerUsername == null || requestedBy == null
+                || !requestedBy.equals(factureOwnerUsername)) {
+            log.error(
+                    "🚨 IDOR ATTEMPT - CLIENT trying to access another client's facture: {} tried to access {}'s facture",
+                    requestedBy, factureOwnerUsername);
 
-                throw new InsecureDirectObjectReferenceException(requestedBy,
-                        "facture owned by " + factureOwnerUsername);
-            }
+            securityAuditService.logUnauthorizedAccess(
+                    requestedBy,
+                    "facture owned by " + factureOwnerUsername,
+                    "GET",
+                    "127.0.0.1",
+                    "Tentative d'accès IDOR sur la facture d'un autre client");
+
+            throw new InsecureDirectObjectReferenceException(requestedBy,
+                    "facture owned by " + factureOwnerUsername);
         }
     }
 

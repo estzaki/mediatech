@@ -2,6 +2,10 @@ package com.estc.mediatech_2.service;
 
 import com.estc.mediatech_2.dao.SecurityEventDao;
 import com.estc.mediatech_2.models.SecurityEventEntity;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -10,9 +14,13 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Security Audit Service for Forensic Analysis
+ * Security Audit Service for Forensic Analysis & Active SOC Alerting
  * 
  * Features:
  * - Structured security event logging
@@ -20,8 +28,9 @@ import java.time.temporal.ChronoUnit;
  * - Asynchronous logging for performance
  * - Forensic analysis support
  * - Automatic cleanup of old events
+ * - Active Real-Time SOC Alerting & Acknowledgment (Phase 9 - A09:2025)
  * 
- * OWASP: A09:2021 – Security Logging and Monitoring Failures
+ * OWASP: A09:2021 / A09:2025 – Security Logging and Alerting Failures
  */
 @Service
 @RequiredArgsConstructor
@@ -29,6 +38,34 @@ import java.time.temporal.ChronoUnit;
 public class SecurityAuditService {
 
     private final SecurityEventDao securityEventDao;
+    private final EmailService emailService;
+
+    /**
+     * In-memory registry of active real-time security alerts (Thread-safe)
+     */
+    private final List<ActiveSecurityAlert> activeAlerts = new CopyOnWriteArrayList<>();
+
+    /**
+     * Model representing an active alert in the SOC console
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ActiveSecurityAlert {
+        private String id;
+        private Long eventId;
+        private String eventType;
+        private String severity;
+        private String username;
+        private String ipAddress;
+        private String resource;
+        private String details;
+        private Instant timestamp;
+        private boolean acknowledged;
+        private Instant acknowledgedAt;
+        private String acknowledgedBy;
+    }
 
     /**
      * Log unauthorized access attempts
@@ -115,10 +152,13 @@ public class SecurityAuditService {
                 .timestamp(Instant.now())
                 .build();
 
-        securityEventDao.save(event);
+        SecurityEventEntity saved = securityEventDao.save(event);
 
         log.error("🚨 CRITICAL SECURITY INCIDENT - Type: {}, User: {}, Resource: {}, IP: {}, Details: {}",
                 incidentType, username, resource, ipAddress, details);
+
+        // Trigger active alerting for SOC
+        triggerSecurityAlert(saved);
     }
 
     /**
@@ -138,13 +178,13 @@ public class SecurityAuditService {
                 .timestamp(Instant.now())
                 .build();
 
-        securityEventDao.save(event);
+        SecurityEventEntity saved = securityEventDao.save(event);
 
         log.error("🚨🚨🚨 CRITICAL SECURITY INCIDENT - Type: {}, User: {}, Resource: {}, IP: {}",
                 incidentType, username, resource, ipAddress);
 
-        // In production, trigger alerts (email, Slack, PagerDuty, etc.)
-        triggerSecurityAlert(event);
+        // Trigger active alerting for SOC
+        triggerSecurityAlert(saved);
     }
 
     /**
@@ -180,17 +220,68 @@ public class SecurityAuditService {
     }
 
     /**
-     * Trigger security alerts for critical incidents
-     * In production: integrate with monitoring systems
+     * Trigger security alerts for critical incidents (Phase 9 - A09:2025)
+     * - Retains active alerts in-memory for the SOC dashboard
+     * - Dispatches email notification via EmailService
      */
-    private void triggerSecurityAlert(SecurityEventEntity event) {
-        // TODO: Implement in production
-        // - Send email to security team
-        // - Post to Slack/Discord
-        // - Trigger PagerDuty
-        // - Send SMS for critical incidents
+    public void triggerSecurityAlert(SecurityEventEntity event) {
+        String alertId = UUID.randomUUID().toString();
+        ActiveSecurityAlert alert = ActiveSecurityAlert.builder()
+                .id(alertId)
+                .eventId(event.getId())
+                .eventType(event.getEventType())
+                .severity(event.getSeverity())
+                .username(event.getUsername() != null ? event.getUsername() : "anonymous")
+                .ipAddress(event.getIpAddress())
+                .resource(event.getResource())
+                .details(event.getDetails())
+                .timestamp(event.getTimestamp() != null ? event.getTimestamp() : Instant.now())
+                .acknowledged(false)
+                .build();
 
-        log.error("🔔 ALERT TRIGGERED - Incident: {}, User: {}, IP: {}",
-                event.getEventType(), event.getUsername(), event.getIpAddress());
+        // 1. Enregistrer dans la liste des alertes actives (les plus récentes en tête)
+        activeAlerts.add(0, alert);
+        if (activeAlerts.size() > 200) {
+            activeAlerts.remove(activeAlerts.size() - 1);
+        }
+
+        // 2. Envoi d'alerte mail via EmailService
+        try {
+            emailService.sendSecurityAlertEmail(
+                    "soc-admin@mediatech.com",
+                    event.getEventType(),
+                    event.getSeverity(),
+                    event.getUsername(),
+                    event.getIpAddress(),
+                    event.getDetails());
+        } catch (Exception e) {
+            log.warn("Notice: Impossible d'envoyer l'alerte email : {}", e.getMessage());
+        }
+
+        log.error("🔔 ACTIVE SOC ALERT TRIGGERED [ID: {}] - Type: {}, User: {}, IP: {}",
+                alertId, event.getEventType(), event.getUsername(), event.getIpAddress());
+    }
+
+    /**
+     * Get all active security alerts for the SOC dashboard
+     */
+    public List<ActiveSecurityAlert> getActiveAlerts() {
+        return Collections.unmodifiableList(activeAlerts);
+    }
+
+    /**
+     * Acknowledge an active security alert by ID
+     */
+    public boolean acknowledgeAlert(String alertId, String acknowledgedBy) {
+        for (ActiveSecurityAlert alert : activeAlerts) {
+            if (alert.getId().equals(alertId)) {
+                alert.setAcknowledged(true);
+                alert.setAcknowledgedAt(Instant.now());
+                alert.setAcknowledgedBy(acknowledgedBy);
+                log.info("✅ SOC Alert [{}] acknowledged by {}", alertId, acknowledgedBy);
+                return true;
+            }
+        }
+        return false;
     }
 }

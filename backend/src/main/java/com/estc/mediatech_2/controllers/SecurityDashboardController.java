@@ -3,10 +3,13 @@ package com.estc.mediatech_2.controllers;
 import com.estc.mediatech_2.dao.SecurityEventDao;
 import com.estc.mediatech_2.models.SecurityEventEntity;
 import com.estc.mediatech_2.service.SecurityAnalyticsService;
+import com.estc.mediatech_2.service.SecurityAuditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -48,6 +51,39 @@ public class SecurityDashboardController {
 
         private final SecurityEventDao securityEventDao;
         private final SecurityAnalyticsService securityAnalyticsService;
+        private final SecurityAuditService securityAuditService;
+
+        /**
+         * Real-time SOC Active Alerts (Phase 9 - A09:2025)
+         * Returns active, unacknowledged or recent security alerts
+         */
+        @GetMapping("/alerts")
+        public ResponseEntity<List<SecurityAuditService.ActiveSecurityAlert>> getActiveAlerts() {
+                return ResponseEntity.ok(securityAuditService.getActiveAlerts());
+        }
+
+        /**
+         * Acknowledge a SOC Security Alert (Phase 9 - A09:2025)
+         */
+        @PostMapping("/alerts/{id}/acknowledge")
+        public ResponseEntity<?> acknowledgeAlert(
+                        @PathVariable("id") String id,
+                        Authentication authentication) {
+                String adminUsername = (authentication != null && authentication.getName() != null)
+                                ? authentication.getName()
+                                : "ADMIN";
+
+                boolean acknowledged = securityAuditService.acknowledgeAlert(id, adminUsername);
+                if (acknowledged) {
+                        return ResponseEntity.ok(Map.of(
+                                        "message", "Alert acknowledged successfully",
+                                        "id", id,
+                                        "acknowledgedBy", adminUsername));
+                } else {
+                        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                        .body(Map.of("error", "Alert not found or already acknowledged"));
+                }
+        }
 
         /**
          * Global SOC Overview

@@ -75,6 +75,16 @@ public class EnhancedJwtAuthenticationFilter extends OncePerRequestFilter {
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
 
+                // Security Enhancement (Phase 7 - A07:2025): Strict Token Type Verification
+                // Enforce that only tokens with type 'ACCESS' are accepted for API authentication
+                String tokenType = jwtUtil.extractTokenType(jwt);
+                if (!"ACCESS".equals(tokenType)) {
+                    log.warn("Rejected token for user {}: invalid token type '{}' (expected 'ACCESS')", username, tokenType);
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.getWriter().write("Invalid token type: ACCESS token required");
+                    return;
+                }
+
                 // Validate token
                 if (jwtUtil.isTokenValid(jwt, userDetails)) {
                     // Check if user account is locked or disabled
@@ -117,19 +127,30 @@ public class EnhancedJwtAuthenticationFilter extends OncePerRequestFilter {
             response.getWriter().write("Invalid token");
             return;
         } catch (Exception e) {
-            log.error("Authentication error: {}", e.getMessage());
+            // Fail-closed (OWASP A10:2025): never continue the filter chain on unexpected auth error
+            log.error("Authentication error", e);
+            SecurityContextHolder.clearContext();
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("Authentication failed");
+            return;
         }
 
         filterChain.doFilter(request, response);
     }
 
     /**
-     * Check if the request path is public (doesn't require authentication)
+     * Check if the request path is public (doesn't require authentication).
+     * Excludes /api/auth/register/admin, /api/auth/register/vendeur, and /api/auth/logout
+     * so their Bearer tokens are authenticated properly.
      */
     private boolean isPublicPath(String path) {
-        return path.startsWith("/api/auth/") ||
+        return path.equals("/api/auth/login") ||
+                path.equals("/api/auth/refresh") ||
+                path.equals("/api/auth/register") ||
+                path.equals("/api/auth/register/client") ||
+                path.equals("/api/auth/verify") ||
                 path.equals("/error") ||
-                path.startsWith("/actuator/health");
+                path.equals("/actuator/health");
     }
 
     /**

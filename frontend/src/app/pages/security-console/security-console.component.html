@@ -10,6 +10,60 @@
 
     <div *ngIf="!loading" class="dashboard-grid">
 
+        <!-- SECTION 0: REAL-TIME SOC ALERTS (PHASE 9 - A09:2025) -->
+        <section class="card alerts-section">
+            <div class="alerts-header">
+                <h2>
+                    <span class="icon">🚨</span> Alertes Temps Réel SOC
+                    <span class="badge-alert-count" *ngIf="alerts.length > 0">{{ alerts.length }}</span>
+                </h2>
+                <button (click)="refreshAlerts()" class="btn-refresh">🔄 Rafraîchir</button>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Horodatage</th>
+                            <th>Type d'Incident</th>
+                            <th>Sévérité</th>
+                            <th>Utilisateur</th>
+                            <th>IP Client</th>
+                            <th>Détails</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr *ngFor="let alert of alerts" [class.row-critical]="alert.severity === 'CRITICAL'">
+                            <td>{{ alert.timestamp | date:'HH:mm:ss' }}</td>
+                            <td><code>{{ alert.eventType }}</code></td>
+                            <td>
+                                <span class="badge" [ngClass]="getSeverityClass(alert.severity)">
+                                    {{ alert.severity }}
+                                </span>
+                            </td>
+                            <td>{{ alert.username || 'anonymous' }}</td>
+                            <td>{{ alert.ipAddress || 'N/A' }}</td>
+                            <td>{{ alert.details }}</td>
+                            <td>
+                                <span *ngIf="alert.acknowledged" class="badge-ack">
+                                    ✓ Acquitté
+                                </span>
+                                <button *ngIf="!alert.acknowledged"
+                                        (click)="acknowledgeAlert(alert)"
+                                        [disabled]="acknowledgingId === alert.id"
+                                        class="btn-ack">
+                                    {{ acknowledgingId === alert.id ? 'En cours...' : 'Acquitter' }}
+                                </button>
+                            </td>
+                        </tr>
+                        <tr *ngIf="alerts.length === 0">
+                            <td colspan="7" class="empty-state">Aucune alerte active. Tous les systèmes sont nominaux.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- SECTION 1: USER RISK PROFILING -->
         <section class="card risk-section">
             <h2><span class="icon">👥</span> User Risk Profiling</h2>

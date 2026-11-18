@@ -96,17 +96,22 @@ class Phase5And6SecurityTest {
 
         SecurityEventDao securityEventDao = createDaoStub(SecurityEventDao.class, (proxy, method, args) -> null);
 
-        SecurityAuditService securityAuditService = new SecurityAuditService(securityEventDao) {
-            @Override
-            public void logSuspiciousActivity(String username, String activityType, String ipAddress, String details) {
-                auditedActivities.add(username + ":" + activityType + ":" + details);
-            }
-        };
-
         EmailService emailService = new EmailService() {
             @Override
             public void sendVerificationEmail(String to, String code) {
                 // no-op for unit tests
+            }
+
+            @Override
+            public void sendSecurityAlertEmail(String toEmail, String eventType, String severity, String user, String ipAddress, String details) {
+                // no-op for unit tests
+            }
+        };
+
+        SecurityAuditService securityAuditService = new SecurityAuditService(securityEventDao, emailService) {
+            @Override
+            public void logSuspiciousActivity(String username, String activityType, String ipAddress, String details) {
+                auditedActivities.add(username + ":" + activityType + ":" + details);
             }
         };
 
