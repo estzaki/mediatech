@@ -4,6 +4,8 @@ import com.estc.mediatech_2.dao.ProduitDao;
 import com.estc.mediatech_2.dto.ProduitRequestDto;
 import com.estc.mediatech_2.dto.ProduitResponseDto;
 import com.estc.mediatech_2.models.ProduitEntity;
+import com.estc.mediatech_2.security.validator.MassAssignmentValidator;
+import com.estc.mediatech_2.security.validator.SQLInjectionValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,9 +17,12 @@ import java.util.stream.Collectors;
 public class ProduitServiceImpl implements ProduitService {
 
     private final ProduitDao produitDao;
+    private final SQLInjectionValidator sqlInjectionValidator;
+    private final MassAssignmentValidator massAssignmentValidator;
 
     @Override
     public ProduitResponseDto save(ProduitRequestDto request) {
+        sqlInjectionValidator.validateProduitRequest(request);
         ProduitEntity entity = new ProduitEntity();
         entity.setRef_produit(request.getRef_produit());
         entity.setLibelle_produit(request.getLibelle_produit());
@@ -34,6 +39,9 @@ public class ProduitServiceImpl implements ProduitService {
 
     @Override
     public ProduitResponseDto update(ProduitRequestDto request, Long id) {
+        sqlInjectionValidator.validateProduitRequest(request);
+        massAssignmentValidator.validateProduitUpdate(
+                List.of("ref_produit", "libelle_produit", "prix_unitaire", "qte_stock", "imageUrl"));
         return produitDao.findById(id).map(entity -> {
             entity.setRef_produit(request.getRef_produit());
             entity.setLibelle_produit(request.getLibelle_produit());

@@ -50,6 +50,9 @@ public class MassAssignmentValidator {
     private static final List<String> PROTECTED_CLIENT_FIELDS = Arrays.asList(
             "id", "id_client", "user");
 
+    private static final List<String> PROTECTED_PRODUIT_FIELDS = Arrays.asList(
+            "id", "id_produit");
+
     /**
      * Validate that no protected user fields are being modified
      */
@@ -108,6 +111,22 @@ public class MassAssignmentValidator {
         for (String field : fieldsBeingUpdated) {
             if (PROTECTED_CLIENT_FIELDS.contains(field)) {
                 log.error("🚨 MASS ASSIGNMENT ATTEMPT - User: {} tried to modify protected client field: {}",
+                        username, field);
+
+                throw new MassAssignmentException(username, field);
+            }
+        }
+    }
+
+    /**
+     * Validate product field updates
+     */
+    public void validateProduitUpdate(List<String> fieldsBeingUpdated) {
+        String username = getCurrentUsername();
+
+        for (String field : fieldsBeingUpdated) {
+            if (PROTECTED_PRODUIT_FIELDS.contains(field)) {
+                log.error("🚨 MASS ASSIGNMENT ATTEMPT - User: {} tried to modify protected product field: {}",
                         username, field);
 
                 throw new MassAssignmentException(username, field);

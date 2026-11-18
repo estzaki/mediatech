@@ -6,9 +6,13 @@ import com.estc.mediatech_2.dto.UserResponseDto;
 import com.estc.mediatech_2.models.UserEntity;
 import com.estc.mediatech_2.dao.ClientDao;
 import com.estc.mediatech_2.models.ClientEntity;
+import com.estc.mediatech_2.security.validator.MassAssignmentValidator;
+import com.estc.mediatech_2.security.validator.SQLInjectionValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -18,9 +22,17 @@ public class UserServiceImpl implements UserService {
     private final ClientDao clientDao;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final SQLInjectionValidator sqlInjectionValidator;
+    private final MassAssignmentValidator massAssignmentValidator;
 
     @Override
     public UserResponseDto createUser(UserRequestDto request) {
+        // OWASP A05:2025 – Validate inputs against SQL injection
+        sqlInjectionValidator.validateUserRequest(request);
+
+        // OWASP A06:2025 – Validate allowed user fields against mass assignment
+        massAssignmentValidator.validateUserUpdate(List.of("username", "email", "password"));
+
         // Vérifier que le username n'existe pas déjà
         if (userDao.findByUsername(request.getUsername()).isPresent()) {
             throw new IllegalArgumentException("Le nom d'utilisateur existe déjà");
@@ -80,8 +92,34 @@ public class UserServiceImpl implements UserService {
         return dto;
     }
 
+    public UserResponseDto updateUser(Long id, UserRequestDto request) {
+        sqlInjectionValidator.validateUserRequest(request);
+        massAssignmentValidator.validateUserUpdate(List.of("username", "email", "password"));
+
+        UserEntity user = userDao.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Utilisateur non trouvé"));
+
+        if (request.getRole() != null && !request.getRole().equals(user.getRole())) {
+            massAssignmentValidator.validateRoleModification(user.getRole(), request.getRole());
+            user.setRole(request.getRole());
+        }
+
+        if (request.getUsername() != null && !request.getUsername().isBlank()) {
+            user.setUsername(request.getUsername());
+        }
+        if (request.getEmail() != null) {
+            user.setEmail(request.getEmail());
+        }
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
+        return mapToDto(userDao.save(user));
+    }
+
     @Override
     public boolean verifyUser(String token) {
+        sqlInjectionValidator.validateInput("code", token);
         java.util.Optional<UserEntity> userOptional = userDao.findByVerificationCode(token);
         if (userOptional.isPresent()) {
             UserEntity user = userOptional.get();

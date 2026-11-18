@@ -4,6 +4,8 @@ import com.estc.mediatech_2.dao.ClientDao;
 import com.estc.mediatech_2.dto.ClientRequestDto;
 import com.estc.mediatech_2.dto.ClientResponseDto;
 import com.estc.mediatech_2.models.ClientEntity;
+import com.estc.mediatech_2.security.validator.MassAssignmentValidator;
+import com.estc.mediatech_2.security.validator.SQLInjectionValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,9 +17,12 @@ import java.util.stream.Collectors;
 public class ClientServiceImpl implements ClientService {
 
     private final ClientDao clientDao;
+    private final SQLInjectionValidator sqlInjectionValidator;
+    private final MassAssignmentValidator massAssignmentValidator;
 
     @Override
     public ClientResponseDto save(ClientRequestDto request) {
+        sqlInjectionValidator.validateClientRequest(request);
         ClientEntity entity = new ClientEntity();
         entity.setNom_client(request.getNom_client());
         entity.setPrenom_client(request.getPrenom_client());
@@ -32,11 +37,14 @@ public class ClientServiceImpl implements ClientService {
 
     @Override
     public ClientResponseDto findByTel(String tel) {
+        sqlInjectionValidator.validateInput("telephone", tel);
         return clientDao.findByTelephone(tel).map(this::mapToDto).orElse(null);
     }
 
     @Override
     public ClientResponseDto update(ClientRequestDto request, Long id) {
+        sqlInjectionValidator.validateClientRequest(request);
+        massAssignmentValidator.validateClientUpdate(List.of("nom_client", "prenom_client", "telephone"));
         return clientDao.findById(id).map(entity -> {
             entity.setNom_client(request.getNom_client());
             entity.setPrenom_client(request.getPrenom_client());

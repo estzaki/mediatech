@@ -8,13 +8,17 @@ import com.estc.mediatech_2.dto.FactureResponseDto;
 import com.estc.mediatech_2.dto.LigneFactureResponseDto;
 import com.estc.mediatech_2.dto.ProduitResponseDto;
 import com.estc.mediatech_2.dto.ClientResponseDto;
+import com.estc.mediatech_2.models.ClientEntity;
 import com.estc.mediatech_2.models.FactureEntity;
 import com.estc.mediatech_2.models.LigneFactureEntity;
 import com.estc.mediatech_2.models.ProduitEntity;
+import com.estc.mediatech_2.security.validator.MassAssignmentValidator;
+import com.estc.mediatech_2.security.validator.SQLInjectionValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,23 +29,76 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FactureServiceImpl implements FactureService {
 
+    // OWASP A06:2025 – Active Business Velocity Limit (max 5 pending invoices/day per client)
+    private static final int MAX_DAILY_PENDING_INVOICES_PER_CLIENT = 5;
+
     private final FactureDao factureDao;
     private final ClientDao clientDao;
     private final ProduitDao produitDao;
     private final com.estc.mediatech_2.dao.UserDao userDao;
+    private final MassAssignmentValidator massAssignmentValidator;
+    private final SQLInjectionValidator sqlInjectionValidator;
+    private final SecurityAuditService securityAuditService;
 
     @Override
     @Transactional
     public FactureResponseDto createFacture(FactureRequestDto request) {
+        String currentUsername = org.springframework.security.core.context.SecurityContextHolder.getContext()
+                .getAuthentication() != null
+                        ? org.springframework.security.core.context.SecurityContextHolder.getContext()
+                                .getAuthentication().getName()
+                        : "anonymous";
+
+        // Validate allowed invoice creation fields (prevent mass assignment)
+        massAssignmentValidator.validateFactureUpdate(List.of("id_client", "ligneFactures"));
+
+        if (request.getLigneFactures() == null || request.getLigneFactures().isEmpty()) {
+            throw new IllegalArgumentException("Invoice must contain at least one line item");
+        }
+
+        // Pre-validate quantities (reject negative or zero quantities before DB work)
+        for (var dto : request.getLigneFactures()) {
+            if (dto.getQte() == null || dto.getQte() <= 0) {
+                securityAuditService.logSuspiciousActivity(
+                        currentUsername,
+                        "INVALID_INVOICE_QUANTITY",
+                        "internal",
+                        "Rejected invoice creation with non-positive quantity: " + dto.getQte());
+                throw new IllegalArgumentException("Quantity must be strictly positive (greater than 0)");
+            }
+        }
+
+        ClientEntity client = clientDao.findById(request.getId_client())
+                .orElseThrow(() -> new RuntimeException("Client not found"));
+
+        // OWASP A06:2025 – Enforce active runtime velocity limit per client (> 5 pending invoices/day)
+        LocalDate today = LocalDate.now();
+        long pendingTodayCount = factureDao.findAll().stream()
+                .filter(f -> f.getClient() != null
+                        && client.getId_client().equals(f.getClient().getId_client()))
+                .filter(f -> f.getDate_facture() != null
+                        && today.equals(f.getDate_facture().toLocalDate()))
+                .filter(f -> "EN_ATTENTE".equalsIgnoreCase(f.getStatus()))
+                .count();
+
+        if (pendingTodayCount >= MAX_DAILY_PENDING_INVOICES_PER_CLIENT) {
+            securityAuditService.logSuspiciousActivity(
+                    currentUsername,
+                    "VELOCITY_LIMIT_EXCEEDED",
+                    "internal",
+                    "Client ID " + client.getId_client() + " exceeded daily velocity limit ("
+                            + MAX_DAILY_PENDING_INVOICES_PER_CLIENT + " pending invoices/day)");
+            throw new IllegalStateException(
+                    "Velocity limit exceeded: Maximum " + MAX_DAILY_PENDING_INVOICES_PER_CLIENT
+                            + " pending invoices per day allowed for this client.");
+        }
+
         FactureEntity facture = new FactureEntity();
         facture.setRef_facture(UUID.randomUUID().toString());
         facture.setDate_facture(LocalDateTime.now());
         facture.setStatus("EN_ATTENTE");
-        facture.setClient(clientDao.findById(request.getId_client())
-                .orElseThrow(() -> new RuntimeException("Client not found")));
+        facture.setClient(client);
 
-        String currentUsername = org.springframework.security.core.context.SecurityContextHolder.getContext()
-                .getAuthentication().getName();
         com.estc.mediatech_2.models.UserEntity currentUser = userDao.findByUsername(currentUsername)
                 .orElseThrow(() -> new RuntimeException("User not found: " + currentUsername));
         facture.setVendeur(currentUser);
@@ -57,8 +114,6 @@ public class FactureServiceImpl implements FactureService {
                 throw new RuntimeException("Insufficient stock for product: " + produit.getLibelle_produit());
             }
             // End: Stock will be decremented upon validation
-            // produit.setQte_stock(produit.getQte_stock() - dto.getQte());
-            // produitDao.save(produit);
 
             LigneFactureEntity ligne = new LigneFactureEntity();
             ligne.setProduit(produit);
@@ -97,6 +152,10 @@ public class FactureServiceImpl implements FactureService {
     @Override
     @Transactional
     public FactureResponseDto updateStatus(Long id, String status) {
+        sqlInjectionValidator.validateInput("status", status);
+        massAssignmentValidator.validateFactureUpdate(List.of("status"));
+        massAssignmentValidator.validateFieldAgainstWhitelist("status", List.of("status"));
+
         FactureEntity facture = factureDao.findById(id)
                 .orElseThrow(() -> new RuntimeException("Facture non trouvée"));
 
